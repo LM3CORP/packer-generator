@@ -1,0 +1,120 @@
+{
+    "variables": {
+      "admin_user": "{{admin_user}}",
+      "admin_password": "{{admin_password}}",
+      "iso_checksum_type": "{{iso_checksum_type}}",
+      "puppet_release": "{{puppet_release}}",
+      "pe_version": "{{pe_version}}",
+      "pe_arch": "{{pe_arch}}",
+      "pe_agent_version": "{{pe_agent_version}}",
+      "iso_url": "{{iso_url}}",
+      "iso_checksum": "{{iso_checksum}}",
+      "aws_s3_bucket_name": "{% raw %}{{env `AWS_S3_BUCKET`}}{% endraw %}",
+      "chocolatey_install_url": "{% raw %}{{env `CHOCO_INSTALL_URL`}}{% endraw %}",
+      "vm_version": "{{vm_version}}",
+      "vm_description": "{{vm_description}}"
+    },
+    "builders": [ {
+      "type": "virtualbox-iso",
+      "communicator": "winrm",
+      "iso_url": "{% raw %}{{user `iso_url`}}{% endraw %}",
+      "iso_checksum_type": "{% raw %}{{user `iso_checksum_type`}}{% endraw %}",
+      "iso_checksum": "{% raw %}{{user `iso_checksum`}}{% endraw %}",
+      "headless": true,
+      "boot_wait": "{{boot_wait}}",
+      "winrm_username": "{% raw %}{{user `admin_user`}}{% endraw %}",
+      "winrm_password": "{% raw %}{{user `admin_password`}}{% endraw %}",
+      "winrm_timeout": "{{winrm_timeout}}",
+      "shutdown_command": "shutdown /s /t 10 /f /d p:4:1 /c \"Packer Shutdown\"",
+      "shutdown_timeout": "{{shutdown_timeout}}",
+      "guest_os_type": "{{guest_os_type}}",
+      "guest_additions_mode": "{{guest_additions_mode}}",
+      "output_directory": "{{output_directory}}",
+      "disk_size": {{disk_size}},
+      "format": "{{format}}",
+      "floppy_files": [
+                "http/win/2016/Autounattend.xml",
+                "scripts/win/disable-winrm.ps1",
+                "scripts/win/enable-winrm.ps1",
+                "scripts/win/microsoft-updates.bat",
+                "scripts/win/win-updates.ps1"
+            ],
+      "vboxmanage": [
+                      ["modifyvm", "{% raw%}{{.Name}}{% endraw %}", "--natpf1", "guest_winrm,tcp,,55985,,5985"  ],
+                      ["modifyvm", "{% raw%}{{.Name}}{% endraw %}", "--vram", "36" ],
+                      ["modifyvm", "{% raw%}{{.Name}}{% endraw %}", "--memory", "{{memory}}"],
+                      ["modifyvm", "{% raw%}{{.Name}}{% endraw %}", "--cpus", "{{cpus}}"],
+                      ["modifyvm", "{% raw%}{{.Name}}{% endraw %}","--vrdeaddress", "0.0.0.0" ],
+                      ["modifyvm", "{% raw%}{{.Name}}{% endraw %}", "--hardwareuuid", "02f110e7-369a-4bbc-bbe6-6f0b6864ccb6"  ]
+                    ]
+        }
+    ],
+    "provisioners": [
+    {
+      "type": "windows-shell",
+      "environment_vars": [ "{% raw %}PUPPET_RELEASE={{user `puppet_release`}}{% endraw %}",
+                             "{% raw %}PE_VERSION={{user `pe_version`}}{% endraw %}",
+                             "{% raw %}PE_AGENT_VERSION={{user `pe_agent_version`}}{% endraw %}",
+                             "{% raw %}PE_ARCH={{user `pe_arch`}}{% endraw %}"
+                           ],
+      "execute_command": "{% raw %}{{ .Vars }} cmd /c \"{{ .Path }}\"{% endraw %}",
+      "scripts": [
+        "scripts/win/puppet.bat"
+
+      ]
+    },
+    {
+      "type": "powershell",
+      "environment_vars": [ "{% raw %}CHOCO_INSTALL_URL={{user `chocolatey_install_url`}}{% endraw %}",
+                            "{% raw %}VAGRANT_USER={{user `admin_user`}}{% endraw %}"
+                          ],
+      "scripts": [ "scripts/win/chocolatey.ps1"
+                 ]
+    },
+    {
+      "type": "puppet-masterless",
+      "manifest_file": "puppet/manifests/site.pp",
+      "module_paths": ["puppet/modules"],
+      "guest_os_type": "windows"
+    },
+    {
+      "type": "windows-shell",
+      "environment_vars": [ "{% raw %}CHOCO_INSTALL_URL={{user `chocolatey_install_url`}}{% endraw %}",
+                            "{% raw %}VAGRANT_USER={{user `admin_user`}}{% endraw %}"
+                          ],
+      "scripts": [
+        "scripts/win/uac-enable.bat",
+        "scripts/win/enable-rdp.bat",
+        "scripts/win/compile-dotnet-assemblies.bat"
+      ]
+    }
+    ],
+   "post-processors" : [
+     {% if build_vagrant_box -%}
+     {
+       "type": "vagrant",
+       "keep_input_artifact": false,
+       "output": "{% raw %}windows_2016_{{.Provider}}.box{% endraw %}"
+     }
+     {% endif  -%}
+     {% if build_vagrant_box and build_amazon_ami -%}
+     ,
+     {% endif -%}
+     {% if build_amazon_ami -%}
+     {
+       "type": "amazon-import",
+       "only": ["virtualbox-iso"],
+       "access_key": "{{access_key}}",
+       "secret_key": "{{secret_key}}",
+       "region": "{{region}}",
+       "s3_bucket_name": "{% raw %}{{user `aws_s3_bucket_name`}}{{% endraw %}}",
+       "keep_input_artifact": false,
+       "license_type": "BYOL",
+       "tags":
+        {
+         "Description": "packer amazon-import {{timestamp}}"
+        }
+      }
+      {% endif -%}
+    ]
+}
